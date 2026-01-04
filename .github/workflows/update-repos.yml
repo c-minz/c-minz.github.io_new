@@ -1,0 +1,73 @@
+name: Update GitHub repo data
+
+on:
+  schedule:
+    - cron: "0 0 * * 5" # Friday
+  workflow_dispatch:
+
+jobs:
+  update-repos:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          echo "🔧 Installing dependencies..."
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch repo metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python << 'EOF'
+          import yaml, json, requests
+
+          with open("_data/repositories.yml") as f:
+              repos = yaml.safe_load(f)["github_repos"]
+
+          result = {}
+          headers = {"Authorization": f"token {os.environ['GH_TOKEN']}"}
+
+          for r in repos:
+              url = f"https://api.github.com/repos/{r}"
+              data = requests.get(url, headers=headers).json()
+              result[r] = {
+                  "language": data.get("language"),
+                  "stargazers_count": data.get("stargazers_count"),
+                  "watchers_count": data.get("watchers_count"),
+                  "subscribers_count": data.get("subscribers_count"),
+                  "forks_count": data.get("forks_count"),
+                  "open_issues": data.get("open_issues"),
+                  "watchers": data.get("watchers"),
+                  "topics": data.get("topics", []),
+                  "description": data.get("description"),
+                  "homepage": data.get("homepage")
+              }
+
+          with open("_data/github_repos.json", "w") as f:
+              json.dump(result, f, indent=2)
+          EOF
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          echo "🔧 Git configured."
+
+      - name: Commit and push if changed
+        run: |
+          git add _data/citations.yml
+          git diff --staged --quiet || (
+            echo "📤 Committing and pushing changes..."
+            git commit -m "Update GitHub repo metadata"
+            git push
+          )
